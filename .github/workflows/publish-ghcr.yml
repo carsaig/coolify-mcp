@@ -1,10 +1,10 @@
-name: Sync & Build coolify-mcp (with strict audit)
+name: Sync upstream release → Build & Cleanup (GHCR)
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Optional semver override tag (e.g. v1.2.3)'
+        description: 'Override tag to build (e.g. v1.2.3)'
         required: false
         type: string
   schedule:
@@ -18,7 +18,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
@@ -26,12 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Security audit (critical only, allowlist known advisories)
-        run: |
-          npx audit-ci@^7 \
-            --critical \
-            --moderate=false \
-            --low=false \
-            --allowlist GHSA-968p-4wvh-cqc8 GHSA-v6h2-p8h4-qcjw GHSA-952p-6rrq-rcjv
+      - name: Security audit (critical only)
+        run: npx audit-ci@^7 --config ./audit-ci.jsonc
         env:
           CI: true
