@@ -1,0 +1,32 @@
+FROM node:18-alpine
+
+# Install debugging tools
+RUN apk add --no-cache curl netcat-openbsd
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies with verbose logging
+RUN npm ci --audit=false --fund=false --verbose
+
+# Copy source code
+COPY . .
+
+# Build the project
+RUN npm run build || echo "Build failed, checking what's available..."
+
+# List what we have
+RUN ls -la
+RUN ls -la dist/ || echo "No dist directory"
+
+# Make debug script executable
+RUN chmod +x tmp/debug-docker.js
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD node -e "console.log('Health check: Container is running')" || exit 1
+
+# Use debug script as entrypoint
+CMD ["node", "tmp/debug-docker.js"]

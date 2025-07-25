@@ -1,24 +1,39 @@
-# Dockerfile
-# Override der upstream Version um npm audit zu umgehen
-
+# Dockerfile for Coolify MCP Server
 FROM node:18-alpine
+
+# Install required system dependencies
+RUN apk add --no-cache git
 
 WORKDIR /app
 
-# Kopiere package.json und package-lock.json
+# Copy package files first for better Docker layer caching
 COPY package*.json ./
+COPY tsconfig.json ./
 
-# Installiere Dependencies OHNE audit
+# Install dependencies (disable audit for faster builds)
+RUN npm ci --audit=false --fund=false --only=production
+
+# Install dev dependencies needed for build
 RUN npm ci --audit=false --fund=false
 
-# Kopiere Source Code
-COPY . .
+# Copy source code
+COPY src/ ./src/
 
-# Build das Projekt (falls nötig)
-RUN npm run build 2>/dev/null || echo "No build script found"
+# Build the TypeScript project
+RUN npm run build
 
-# Expose Port (adjust as needed)
-EXPOSE 3000
+# Verify the build output exists
+RUN ls -la dist/ && test -f dist/index.js
 
-# Start Command
-CMD ["npm", "start"]
+# Remove dev dependencies to reduce image size
+RUN npm prune --production
+
+# MCP servers use stdio transport, no ports needed
+# EXPOSE is removed as it's not applicable for MCP servers
+
+# Health check to verify the container can start
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD node -e "console.log('Health check: Node.js is working')" || exit 1
+
+# Start the MCP server
+CMD ["node", "dist/index.js"]

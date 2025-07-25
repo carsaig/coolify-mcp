@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "coolify": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-e", "COOLIFY_BASE_URL=https://your-coolify-instance.com",
+        "-e", "COOLIFY_ACCESS_TOKEN=your-actual-api-token",
+        "-e", "DEBUG=coolify:*",
+        "ghcr.io/carsaig/coolify-mcp:latest"
+      ]
+    }
+  }
+}

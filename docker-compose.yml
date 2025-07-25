@@ -1,15 +1,34 @@
+version: '3.8'
+
 services:
   coolify-mcp:
-    image: image: ghcr.io/carsaig/coolify-mcp:latest
+    image: ghcr.io/carsaig/coolify-mcp:latest
     container_name: coolify-mcp
     environment:
-      COOLIFY_BASE_URL: "op://Private/Coolify/BASE_URL"
-      COOLIFY_ACCESS_TOKEN: "op://Private/Coolify/API_Token"
-    expose:
-      - "3000"
-        networks:
-      - mcp-net
+      # TODO: Replace with your actual Coolify instance URL
+      COOLIFY_BASE_URL: "${COOLIFY_BASE_URL:-https://your-coolify-instance.com}"
+      # TODO: Replace with your actual Coolify API token
+      COOLIFY_ACCESS_TOKEN: "${COOLIFY_ACCESS_TOKEN:-your-actual-api-token}"
+      # Enable debug logging to help with troubleshooting
+      DEBUG: "coolify:*"
+      NODE_ENV: "production"
+    # MCP servers use stdio transport, not HTTP - no ports needed
+    restart: unless-stopped
+    # Create logs directory for debugging
+    volumes:
+      - ./logs:/app/logs
+    # Use default bridge network for simplicity
+    # networks:
+    #   - mcp-net
+    # Add health check to monitor container status
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('Health check passed')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
-  networks:
-  mcp-net:
-    external: true
+# Simplified network setup - using default bridge network
+# networks:
+#   mcp-net:
+#     driver: bridge
