@@ -1,11 +1,38 @@
 {
-  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
-  "critical": true,
-  "moderate": false,
-  "low": false,
+  // audit-ci configuration for coolify-mcp
+  // Only fail on high and critical vulnerabilities
+  "low": true,
+  "moderate": true,
+  "high": false,
+  "critical": false,
+  
+  // Skip specific advisories that are known and acceptable
   "allowlist": [
+    // Babel helpers RegExp complexity - moderate severity, low exploitability in server context
     "GHSA-968p-4wvh-cqc8",
+    
+    // brace-expansion ReDOS - moderate severity, typically not exploitable in MCP server context
     "GHSA-v6h2-p8h4-qcjw",
+    
+    // micromatch ReDOS - moderate severity, limited impact in this use case
     "GHSA-952p-6rrq-rcjv"
-  ]
+  ],
+  
+  // Directories to skip (if any)
+  "skip-dev": false,
+  
+  // Output format
+  "output-format": "table",
+  
+  // Show found vulnerabilities even if they don't cause failure
+  "show-found": true,
+  
+  // Report summary
+  "summary": true,
+  
+  // Retry configuration for network issues
+  "retry": {
+    "count": 3,
+    "delay": 1000
+  }
 }
