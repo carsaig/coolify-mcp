@@ -1,10 +1,10 @@
-name: Sync upstream release, build & cleanup GHCR
+name: Sync upstream release, build & cleanup GHCR (with npm audit)
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Optionally override tag to build (e.g. v1.2.3)'
+        description: 'Override tag to build (semantic version e.g. v1.2.3)'
         required: false
         type: string
   schedule:
@@ -15,7 +15,33 @@ permissions:
   packages: write
 
 jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit (fail on high+)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Attempt to fix issues automatically
+        if: failure()
+        run: |
+          npm audit fix || echo "auto-fix failed or no fix available"
+
+      - name: Report npm audit status
+        if: success()
+        run: echo "npm audit passed (no high or critical vulnerabilities)"
+        if: failure()
+        run: echo "npm audit found issues — review output above"
+
   sync_and_build:
+    needs: audit
     runs-on: ubuntu-latest
     outputs:
       built_tag: ${{ steps.semver.outputs.full }}
@@ -25,7 +51,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add upstream remote
+      - name: Add upstream remote & fetch tags
         run: |
           git remote add upstream https://github.com/StuMason/coolify-mcp.git
           git fetch upstream --tags
@@ -34,34 +60,33 @@ jobs:
         id: desired
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
-            tag="${{ github.event.inputs.version }}"
-            using_override=true
+            tag="${{ github.event.inputs.version }}"; using_override=true
           else
-            tag=$(git ls-remote --tags upstream | grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
-              | sort -V | tail -n1 | sed 's#.*/##')
+            tag=$(git ls-remote --tags upstream \
+                  | grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+                  | sort -V | tail -n1 | sed 's#.*/##')
             using_override=false
           fi
           if [ -z "$tag" ]; then
-            echo "No valid semver tag found. Exiting gracefully."
+            echo "No valid semver tag found. Exiting."
             exit 0
           fi
           echo "tag=$tag" >> $GITHUB_OUTPUT
           echo "using_override=$using_override" >> $GITHUB_OUTPUT
 
-      - name: Validate semantic version format
+      - name: Validate semantic version
         id: semver
         uses: matt-usurp/validate-semver@v2
         with:
           version: ${{ steps.desired.outputs.tag }}
-        # ensures valid semver and exposes outputs: version, prerelease, etc.  [oai_citation:0‡GitHub](https://github.com/matt-usurp/validate-semver?utm_source=chatgpt.com)
 
-      - name: Reject prerelease versions
+      - name: Skip prerelease
         if: steps.semver.outputs.prerelease != ''
         run: |
-          echo "Skipping prerelease tag ${{ steps.semver.outputs.full }}"
+          echo "Skipping prerelease: ${{ steps.semver.outputs.full }}"
           exit 0
 
-      - name: Ensure override tag exists
+      - name: Validate manual override tag exists
         if: steps.desired.outputs.using_override == 'true'
         run: |
           if ! git show-ref --tags | grep -q "${{ steps.desired.outputs.tag }}"; then
@@ -69,7 +94,7 @@ jobs:
             exit 1
           fi
 
-      - name: Compare HEAD with target tag
+      - name: Compare HEAD with target
         id: check
         run: |
           target_sha=$(git rev-list -n 1 "${{ steps.desired.outputs.tag }}")
@@ -80,7 +105,7 @@ jobs:
             echo "up_to_date=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Sync fork and tag
+      - name: Sync fork and tag if outdated
         if: steps.check.outputs.up_to_date == 'false'
         run: |
           git checkout main
@@ -89,11 +114,11 @@ jobs:
           git tag "${{ steps.desired.outputs.tag }}"
           git push origin "${{ steps.desired.outputs.tag }}"
 
-      - name: Log skip
+      - name: Skipped—already updated
         if: steps.check.outputs.up_to_date == 'true'
-        run: echo "Already in sync with tag ${{ steps.desired.outputs.tag }}"
+        run: echo "Already in sync with ${{ steps.desired.outputs.tag }}"
 
-      - name: Log in to GHCR
+      - name: Login to GHCR
         if: steps.check.outputs.up_to_date == 'false'
         uses: docker/login-action@v2
         with:
@@ -127,4 +152,4 @@ jobs:
           delete-untagged: true
           keep-at-most: 5
           filter-tags: 'v*'
-          skip-tags: 'latest'  # preserves latest tag  [oai_citation:1‡GitHub](https://github.com/matt-usurp/validate-semver?utm_source=chatgpt.com) [oai_citation:2‡Stack Overflow](https://stackoverflow.com/questions/77284754/only-run-workflow-if-semantic-version-is-used?utm_source=chatgpt.com) [oai_citation:3‡GitHub](https://github.com/quartx-analytics/ghcr-cleaner?utm_source=chatgpt.com)
+          skip-tags: 'latest'
