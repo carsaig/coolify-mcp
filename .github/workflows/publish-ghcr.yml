@@ -1,9 +1,9 @@
 name: Sync from upstream & publish to GHCR
 
 on:
+  workflow_dispatch:     # Always allowed manually
   schedule:
-    - cron: '0 */6 * * *'     # every 6 hours
-  workflow_dispatch: true
+    - cron: '0 */6 * * *'  # Every 6 hours
 
 jobs:
   sync-and-publish:
@@ -13,18 +13,17 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout forked repo
+      - name: Checkout fork
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          # fetch default remote is your fork
 
       - name: Add upstream remote
         run: |
           git remote add upstream https://github.com/StuMason/coolify-mcp.git
           git fetch upstream
 
-      - name: Check for new upstream release tag
+      - name: Determine latest upstream release tag
         id: check
         run: |
           latest=$(git ls-remote --tags upstream | grep -E 'refs/tags/v[0-9]' | sort -V | tail -n1 | sed 's#.*/##')
@@ -35,7 +34,7 @@ jobs:
             echo "up-to-date=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Sync with upstream and push release tag
+      - name: Sync and publish
         if: steps.check.outputs.up-to-date == 'false'
         run: |
           git checkout main
@@ -44,18 +43,19 @@ jobs:
           git tag $latest
           git push origin $latest
 
-      - name: Log if no changes
+      - name: Skip build if no update
         if: steps.check.outputs.up-to-date == 'true'
-        run: echo "Already up‑to‑date with upstream release ${{ steps.check.outputs.latest }}."
+        run: echo "No new upstream release (current: ${{ steps.check.outputs.latest }})"
 
-      - name: Login to GHCR
+      - name: Log in to GHCR
+        if: steps.check.outputs.up-to-date == 'false'
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build & push Docker image
         if: steps.check.outputs.up-to-date == 'false'
         uses: docker/build-push-action@v4
         with:
