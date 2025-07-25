@@ -1,6 +1,6 @@
 services:
   coolify-mcp:
-    image: carsaig/coolify-mcp
+    image: ghcr.io/carsaig/coolify-mcp
     container_name: coolify-mcp
     environment:
       COOLIFY_BASE_URL: "op://Private/Coolify/BASE_URL"
