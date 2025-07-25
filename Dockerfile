@@ -10,10 +10,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies (disable audit for faster builds)
-RUN npm ci --audit=false --fund=false --only=production
-
-# Install dev dependencies needed for build
+# Install all dependencies (including dev dependencies needed for build)
 RUN npm ci --audit=false --fund=false
 
 # Copy source code
@@ -25,7 +22,7 @@ RUN npm run build
 # Verify the build output exists
 RUN ls -la dist/ && test -f dist/index.js
 
-# Remove dev dependencies to reduce image size
+# Remove dev dependencies to reduce image size (after build)
 RUN npm prune --production
 
 # MCP servers use stdio transport, no ports needed
