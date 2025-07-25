@@ -6,7 +6,7 @@ services:
       COOLIFY_BASE_URL: "op://Private/Coolify/BASE_URL"
       COOLIFY_ACCESS_TOKEN: "op://Private/Coolify/API_Token"
     expose:
-      - "8000"
+      - "3000"
         networks:
       - mcp-net
 
