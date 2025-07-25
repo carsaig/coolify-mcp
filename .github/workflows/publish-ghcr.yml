@@ -30,8 +30,7 @@ jobs:
         run: npx audit-ci@^7 --critical --moderate=false --low=false
         env:
           CI: true
-        # This flags and fails builds only if critical vulnerabilities are detected,
-        # ignoring moderate and low issues.  [oai_citation:0‡npmjs.com](https://www.npmjs.com/package/audit-ci/v/5.1.0?utm_source=chatgpt.com)
+        # audit-ci allows failing only for critical vulnerabilities and reporting moderate ones  [oai_citation:0‡github.com](https://github.com/IBM/audit-ci?utm_source=chatgpt.com)
 
   sync_and_build:
     needs: audit
@@ -75,7 +74,9 @@ jobs:
 
       - name: Skip prerelease
         if: steps.semver.outputs.prerelease != ''
-        run: echo "Skipping prerelease: ${{ steps.semver.outputs.full }}" && exit 0
+        run: |
+          echo "Skipping prerelease: ${{ steps.semver.outputs.full }}"
+          exit 0
 
       - name: Ensure override tag exists (if used)
         if: steps.desired.outputs.using_override == 'true'
@@ -105,9 +106,9 @@ jobs:
           git tag "${{ steps.desired.outputs.tag }}"
           git push origin "${{ steps.desired.outputs.tag }}"
 
-      - name: Skip build if already synced
+      - name: Skip build if already in sync
         if: steps.check.outputs.up_to_date == 'true'
-        run: echo "Already in sync with: ${{ steps.desired.outputs.tag }}"
+        run: echo "Already in sync with tag ${{ steps.desired.outputs.tag }}"
 
       - name: Login to GHCR
         if: steps.check.outputs.up_to_date == 'false'
