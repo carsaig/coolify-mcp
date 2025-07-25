@@ -1,0 +1,24 @@
+services:
+  pluggedin:
+    image: pluggedin-standard:latest
+    networks:
+      - mcp-net
+  coolify-mcp:
+    image: coolify-mcp
+    container_name: coolify-mcp
+    environment:
+      COOLIFY_BASE_URL: "op://Private/Coolify/BASE_URL"
+      COOLIFY_ACCESS_TOKEN: "op://Private/Coolify/API_Token"
+    networks:
+      - mcp-net
+    expose:
+      - "8001:8002"
+  proxy:
+    image: traefik:latest
+    networks:
+      - mcp-net
+    labels:
+      - "traefik.http.routers.mcp.rule=Host(`mcp.yourdomain.com`)"
+      - "traefik.http.services.mcp.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.mcp.headers.customresponseheaders=Content-Type:text/event-stream"
+      - "traefik.http.routers.mcp.middlewares=mcp"
