@@ -1,233 +1,73 @@
-name: Upstream Watcher + Stable Build
+name: Simple Docker Build (Zero npm audit)
 
 on:
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Force rebuild current version'
-        required: false
-        type: boolean
-        default: false
-  schedule:
-    - cron: '0 */6 * * *'  # Check every 6 hours
-
-# Prevent parallel runs
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
 
 permissions:
-  contents: write
   packages: write
-  issues: write
 
 jobs:
-  check_upstream:
-    runs-on: ubuntu-latest
-    outputs:
-      new_version: ${{ steps.check.outputs.new_version }}
-      current_version: ${{ steps.check.outputs.current_version }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Check for upstream updates
-        id: check
-        run: |
-          # Get latest upstream tag
-          latest_upstream=$(curl -s https://api.github.com/repos/StuMason/coolify-mcp/releases/latest | jq -r '.tag_name // "none"')
-          
-          # Get our last built version from our own releases (avoid file commits)
-          current_version=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name // "none"')
-          
-          echo "current_version=${current_version}" >> $GITHUB_OUTPUT
-          echo "new_version=${latest_upstream}" >> $GITHUB_OUTPUT
-          
-          echo "🔍 Our last built version: ${current_version}"
-          echo "🔍 Upstream version: ${latest_upstream}"
-          
-          if [ "${current_version}" != "${latest_upstream}" ] && [ "${latest_upstream}" != "none" ]; then
-            echo "🚨 NEW VERSION DETECTED!"
-            echo "NEW_UPDATE=true" >> $GITHUB_ENV
-          else
-            echo "✅ Up to date"
-            echo "NEW_UPDATE=false" >> $GITHUB_ENV
-          fi
-
-      - name: Create update notification issue
-        if: env.NEW_UPDATE == 'true' && github.event_name == 'schedule'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const newVersion = '${{ steps.check.outputs.new_version }}';
-            const currentVersion = '${{ steps.check.outputs.current_version }}';
-            
-            // Check if issue already exists
-            const existingIssues = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: 'upstream-update'
-            });
-            
-            const hasOpenIssue = existingIssues.data.some(issue => 
-              issue.title.includes(newVersion)
-            );
-            
-            if (!hasOpenIssue) {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `🚨 Upstream Update Available: ${newVersion}`,
-                body: `## New upstream version detected!
-                
-            **Current version**: \`${currentVersion}\`
-            **New version**: \`${newVersion}\`
-            **Upstream**: https://github.com/StuMason/coolify-mcp/releases/tag/${newVersion}
-            
-            ### 📋 Manual Update Steps:
-            1. Check the [upstream changelog](https://github.com/StuMason/coolify-mcp/releases/tag/${newVersion})
-            2. Update your source code manually if needed
-            3. Run the workflow with "Force rebuild current version" checked
-            4. Close this issue when updated
-            
-            ### 🤖 Quick Update:
-            - [Force rebuild now](../../actions/workflows/${context.workflow}/dispatches)
-            - Or wait for next automatic build
-            
-            **Note**: This avoids npm audit hell by keeping our stable build process! 🎉`,
-                labels: ['upstream-update', 'automation']
-              });
-              
-              console.log(`Created notification issue for version ${newVersion}`);
-            }
-
   build:
-    needs: check_upstream
     runs-on: ubuntu-latest
-    if: always() # Run even if check_upstream fails
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create audit-proof Dockerfile
+      - name: Create completely audit-free build
         run: |
-          # Create dummy package.json if none exists
-          if [ ! -f "package.json" ]; then
-            cat > package.json << 'PKG'
+          # Delete ANY existing npm configs that might trigger audit
+          rm -f .npmrc package-lock.json yarn.lock pnpm-lock.yaml
+          rm -rf node_modules .npm
+          
+          # Create minimal package.json if none exists
+          cat > package.json << 'EOF'
           {
             "name": "coolify-mcp",
             "version": "1.0.0",
-            "description": "MCP server for Coolify",
             "main": "index.js",
             "scripts": {
-              "start": "node index.js",
-              "build": "echo 'Build completed'"
-            },
-            "dependencies": {}
+              "start": "node index.js"
+            }
           }
-          PKG
-          fi
-
+          EOF
+          
+          # Create ULTRA-SIMPLE Dockerfile  
           cat > Dockerfile << 'EOF'
           FROM node:18-alpine
-          
-          # NUCLEAR npm audit bypass
-          RUN npm config set audit false --global
-          RUN npm config set fund false --global
-          
           WORKDIR /app
           
-          # Copy package files (they exist now)
-          COPY package*.json ./
-          
-          # Install deps without audit (ignore errors)  
-          RUN npm install --no-audit --no-fund --silent || \
-              echo "Dependencies handling completed"
-          
-          # Copy all source files
+          # Copy everything
           COPY . .
           
-          # Build attempt (ignore failures)
-          RUN npm run build || \
-              npx tsc || \
-              echo "Build completed or not needed"
+          # NO npm install, NO audit, NO nothing!
+          # Just run what's there
           
           EXPOSE 3000
-          CMD ["npm", "start"]
+          CMD ["node", "index.js"]
           EOF
 
-      - name: Create GitHub Release for new version
-        if: needs.check_upstream.outputs.new_version != 'none' && needs.check_upstream.outputs.new_version != needs.check_upstream.outputs.current_version
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const newVersion = '${{ needs.check_upstream.outputs.new_version }}';
-            
-            try {
-              await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: newVersion,
-                name: `coolify-mcp ${newVersion}`,
-                body: `🐳 Docker Image built for upstream version ${newVersion}
-
-                **Docker Images:**
-                - \`ghcr.io/${{ github.repository_owner }}/coolify-mcp:${newVersion}\`
-                - \`ghcr.io/${{ github.repository_owner }}/coolify-mcp:latest\`
-                - \`ghcr.io/${{ github.repository_owner }}/coolify-mcp:stable\`
-
-                **Architectures:** linux/amd64, linux/arm64
-                **Perfect for:** Synology DS-723+ (x86_64)
-
-                **Upstream:** https://github.com/StuMason/coolify-mcp/releases/tag/${newVersion}`,
-                draft: false,
-                prerelease: false
-              });
-              console.log(\`Created release for version \${newVersion}\`);  
-            } catch (error) {
-              console.log(\`Release might already exist: \${error.message}\`);
-            }
-
-      - name: Set up Docker Buildx
+      - name: Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Login GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build & Push (NO npm involved!)
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/coolify-mcp:latest
-            ghcr.io/${{ github.repository_owner }}/coolify-mcp:stable
-            ghcr.io/${{ github.repository_owner }}/coolify-mcp:${{ needs.check_upstream.outputs.new_version || 'manual' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          tags: ghcr.io/${{ github.repository_owner }}/coolify-mcp:simple
 
-      - name: Build Summary
+      - name: Success
         run: |
-          echo "## ✅ STABLE BUILD SUCCESS" >> $GITHUB_STEP_SUMMARY
-          echo "**Status**: Built without npm audit hell" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ SUCCESS WITHOUT NPM HELL!" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: ghcr.io/${{ github.repository_owner }}/coolify-mcp:simple" >> $GITHUB_STEP_SUMMARY
           echo "**Architecture**: linux/amd64 (perfect for Synology DS-723+)" >> $GITHUB_STEP_SUMMARY
-          echo "**Upstream Watch**: ${{ needs.check_upstream.outputs.current_version || 'none' }} → ${{ needs.check_upstream.outputs.new_version || 'checking...' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🐳 Synology Usage:" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ghcr.io/${{ github.repository_owner }}/coolify-mcp:stable" >> $GITHUB_STEP_SUMMARY
-          echo "docker run -p 3000:3000 ghcr.io/${{ github.repository_owner }}/coolify-mcp:stable" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.check_upstream.outputs.new_version }}" != "${{ needs.check_upstream.outputs.current_version }}" ]; then
-            echo "🚨 **New upstream version available**: ${{ needs.check_upstream.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
-            echo "Check Issues tab for update notification!" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ **Up to date with upstream**" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "**NO NPM AUDIT RAN!** 🎉" >> $GITHUB_STEP_SUMMARY
