@@ -1,24 +1,54 @@
-name: Build & Publish coolify-mcp to GHCR
+name: Sync from upstream & publish to GHCR
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-
-permissions:
-  contents: read
-  packages: write
+  schedule:
+    - cron: '0 */6 * * *'     # every 6 hours
+  workflow_dispatch: true
 
 jobs:
-  build-and-publish:
+  sync-and-publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
 
     steps:
-      - name: Checkout code
+      - name: Checkout forked repo
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          # fetch default remote is your fork
 
-      - name: Log in to GitHub Container Registry
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/StuMason/coolify-mcp.git
+          git fetch upstream
+
+      - name: Check for new upstream release tag
+        id: check
+        run: |
+          latest=$(git ls-remote --tags upstream | grep -E 'refs/tags/v[0-9]' | sort -V | tail -n1 | sed 's#.*/##')
+          echo "latest=$latest" >> $GITHUB_OUTPUT
+          if git rev-parse HEAD | grep -q "$latest"; then
+            echo "up-to-date=true" >> $GITHUB_OUTPUT
+          else
+            echo "up-to-date=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sync with upstream and push release tag
+        if: steps.check.outputs.up-to-date == 'false'
+        run: |
+          git checkout main
+          git reset --hard upstream/$latest
+          git push origin main --force
+          git tag $latest
+          git push origin $latest
+
+      - name: Log if no changes
+        if: steps.check.outputs.up-to-date == 'true'
+        run: echo "Already up‑to‑date with upstream release ${{ steps.check.outputs.latest }}."
+
+      - name: Login to GHCR
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
@@ -26,10 +56,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
+        if: steps.check.outputs.up-to-date == 'false'
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
           tags: |
+            ghcr.io/${{ github.repository_owner }}/coolify-mcp:${{ steps.check.outputs.latest }}
             ghcr.io/${{ github.repository_owner }}/coolify-mcp:latest
-            ghcr.io/${{ github.repository_owner }}/coolify-mcp:${{ github.sha }}
