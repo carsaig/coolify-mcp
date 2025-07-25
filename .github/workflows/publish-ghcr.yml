@@ -67,7 +67,7 @@ jobs:
       - name: Success
         run: |
           echo "## ✅ SUCCESS WITHOUT NPM HELL!" >> $GITHUB_STEP_SUMMARY
-          echo "**Image**: ghcr.io/${{ github.repository_owner }}/coolify-mcp:simple" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: ghcr.io/${{ github.repository_owner }}/coolify-mcp:latest" >> $GITHUB_STEP_SUMMARY
           echo "**Architecture**: linux/amd64 (perfect for Synology DS-723+)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**NO NPM AUDIT RAN!** 🎉" >> $GITHUB_STEP_SUMMARY
