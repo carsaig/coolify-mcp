@@ -10,8 +10,11 @@ on:
         default: false
   schedule:
     - cron: '0 */6 * * *'  # Check every 6 hours
-  push:
-    branches: [ main ]
+
+# Prevent parallel runs
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -34,16 +37,13 @@ jobs:
           # Get latest upstream tag
           latest_upstream=$(curl -s https://api.github.com/repos/StuMason/coolify-mcp/releases/latest | jq -r '.tag_name // "none"')
           
-          # Get our current version from a tracking file
-          current_version="none"
-          if [ -f "CURRENT_VERSION" ]; then
-            current_version=$(cat CURRENT_VERSION)
-          fi
+          # Get our last built version from our own releases (avoid file commits)
+          current_version=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name // "none"')
           
           echo "current_version=${current_version}" >> $GITHUB_OUTPUT
           echo "new_version=${latest_upstream}" >> $GITHUB_OUTPUT
           
-          echo "🔍 Current version: ${current_version}"
+          echo "🔍 Our last built version: ${current_version}"
           echo "🔍 Upstream version: ${latest_upstream}"
           
           if [ "${current_version}" != "${latest_upstream}" ] && [ "${latest_upstream}" != "none" ]; then
@@ -103,8 +103,9 @@ jobs:
             }
 
   build:
+    needs: check_upstream
     runs-on: ubuntu-latest
-    if: always()
+    if: always() # Run even if check_upstream fails
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -156,15 +157,37 @@ jobs:
           CMD ["npm", "start"]
           EOF
 
-      - name: Update version tracking
-        run: |
-          # Update our version tracking
-          echo "${{ needs.check_upstream.outputs.new_version }}" > CURRENT_VERSION
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add CURRENT_VERSION
-          git commit -m "📌 Track version ${{ needs.check_upstream.outputs.new_version }}" || echo "No version change"
-          git push || echo "Push completed"
+      - name: Create GitHub Release for new version
+        if: needs.check_upstream.outputs.new_version != 'none' && needs.check_upstream.outputs.new_version != needs.check_upstream.outputs.current_version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const newVersion = '${{ needs.check_upstream.outputs.new_version }}';
+            
+            try {
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: newVersion,
+                name: `coolify-mcp ${newVersion}`,
+                body: `🐳 Docker Image built for upstream version ${newVersion}
+
+                **Docker Images:**
+                - \`ghcr.io/${{ github.repository_owner }}/coolify-mcp:${newVersion}\`
+                - \`ghcr.io/${{ github.repository_owner }}/coolify-mcp:latest\`
+                - \`ghcr.io/${{ github.repository_owner }}/coolify-mcp:stable\`
+
+                **Architectures:** linux/amd64, linux/arm64
+                **Perfect for:** Synology DS-723+ (x86_64)
+
+                **Upstream:** https://github.com/StuMason/coolify-mcp/releases/tag/${newVersion}`,
+                draft: false,
+                prerelease: false
+              });
+              console.log(\`Created release for version \${newVersion}\`);  
+            } catch (error) {
+              console.log(\`Release might already exist: \${error.message}\`);
+            }
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -185,7 +208,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/coolify-mcp:latest
             ghcr.io/${{ github.repository_owner }}/coolify-mcp:stable
-            ghcr.io/${{ github.repository_owner }}/coolify-mcp:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/coolify-mcp:${{ needs.check_upstream.outputs.new_version || 'manual' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
