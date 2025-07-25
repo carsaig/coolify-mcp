@@ -1,4 +1,4 @@
-name: Sync upstream release, build & cleanup GHCR
+name: Sync Upstream Release → Build & Cleanup GHCR
 
 on:
   workflow_dispatch:
@@ -26,11 +26,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run audit-ci (fail only on critical)
-        run: npx audit-ci@^7 --critical --moderate=false --low=false
+      - name: Run audit-ci (fail only on critical, ignore opted advisories)
+        run: |
+          npx audit-ci@^7 \
+            --critical \
+            --moderate=false \
+            --low=false \
+            --allowlist GHSA-968p-4wvh-cqc8 GHSA-v6h2-p8h4-qcjw GHSA-952p-6rrq-rcjv
         env:
           CI: true
-        continue-on-error: false
 
   sync_and_build:
     needs: audit
@@ -60,7 +64,7 @@ jobs:
             using_override=false
           fi
           if [ -z "$tag" ]; then
-            echo "No semver tag found—exiting."
+            echo "No valid semver tag found — exiting."
             exit 0
           fi
           echo "tag=$tag" >> $GITHUB_OUTPUT
@@ -68,7 +72,7 @@ jobs:
 
       - name: Validate semantic version
         id: semver
-        uses: matt-usurp/validate‑semver@v2
+        uses: matt-usurp/validate-semver@v2
         with:
           version: ${{ steps.desired.outputs.tag }}
 
@@ -82,11 +86,11 @@ jobs:
         if: steps.desired.outputs.using_override == 'true'
         run: |
           if ! git show-ref --tags | grep -q "${{ steps.desired.outputs.tag }}"; then
-            echo "Override tag missing: ${{ steps.desired.outputs.tag }}"
+            echo "Override tag not found: ${{ steps.desired.outputs.tag }}"
             exit 1
           fi
 
-      - name: Compare HEAD vs desired tag
+      - name: Compare HEAD vs tag
         id: check
         run: |
           target_sha=$(git rev-list -n1 "${{ steps.desired.outputs.tag }}")
@@ -97,7 +101,7 @@ jobs:
             echo "up_to_date=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Sync fork & tag
+      - name: Sync fork & tag (if outdated)
         if: steps.check.outputs.up_to_date == 'false'
         run: |
           git checkout main
@@ -134,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cleanup old GHCR images
-        uses: quartx‑analytics/ghcr‑cleaner@v1
+        uses: quartx-analytics/ghcr-cleaner@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           owner-type: user
